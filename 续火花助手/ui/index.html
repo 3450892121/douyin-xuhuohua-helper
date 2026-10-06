@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="app-version" content="v0.20.27">
+<meta name="app-ui" content="multi-account">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>抖音续火花助手</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <div class="title">🔥 抖音续火花助手 <span class="ver">…</span></div>
+  <div class="status"><span id="todayGuard" class="today-guard" title="今天已成功续上火花的好友数"></span><span id="statusDot" class="dot gray"></span><span id="statusText">初始化…</span><span id="netStateLabel" class="netstate" title="抖音页网络状态：联网中=好友可能看到你在线；已断网=好友看不到你在线"></span></div>
+</header>
+<div id="accountTabs" class="account-tabs"></div>
+<main>
+  <div class="contentRow">
+    <div class="colLeft">
+      <section class="panel loginPanel">
+        <h2>登录 <span class="info-icon" data-tip="手机抖音扫码登录，登录态保存在本机，下次免登录。若扫码后弹出安全验证（滑动/短信等），请点「显示抖音页」进页面手动完成认证；「退出账号」清除登录态和好友列表缓存（已勾选目标与定时配置保留）。若登录页提示「系统繁忙 / 操作频繁」：那是抖音侧的频次限制，期间不要连点「刷新二维码」、也不要反复退出重登（短时间内多次登录会加重限制）；软件已不再自动点击登录页，登录过程请手动完成">i</span></h2>
+        <div class="qrbox">
+          <img id="qrImg" alt="登录二维码" hidden>
+          <div id="qrPlaceholder" class="qrph">尚未获取二维码<br>点「刷新二维码」即可扫码登录</div>
+        </div>
+        <div class="btncol">
+          <button id="btnEnsureLogin" class="primary">打开抖音页</button>
+          <button id="btnExtractQr">刷新二维码</button>
+          <button id="btnShowDouyin">显示抖音页</button>
+          <button id="btnLogout" class="btn-logout" title="清除本应用内的登录态和好友列表缓存并回到未登录状态（已勾选目标/定时配置保留）">退出账号</button>
+        </div>
+      </section>
+
+      <section class="panel sendPanel">
+        <h2>发送与定时</h2>
+        <label class="msg">发送内容<textarea id="sendText" rows="2" placeholder="续火花啦 🔥🔥🔥"></textarea></label>
+        <div class="tplRow" id="tplList">
+          <span class="muted">快捷文案：</span>
+        </div>
+        <div class="tplAdd">
+          <input type="text" id="tplInput" placeholder="新增快捷文案…">
+          <button id="btnAddTpl">＋添加</button>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="randomMessage">随机文案 <span class="info-icon" data-tip="开启后，每次发送从下方快捷文案池随机抽一条（天天换着发更像真人）；关闭则固定使用上方「发送内容」">i</span></label>
+        </div>
+        <div class="row twocol">
+          <label>全局时间<br><input type="time" id="sendTime" value="09:00"></label>
+          <label>发送间隔(ms) <span class="info-icon" data-tip="两个好友之间暂停的基准毫秒数（随机间隔开启时作为下限），默认 2000，调太小易被抖音风控">i</span><br><input type="number" id="intervalMs" value="2000" min="500" step="100"></label>
+        </div>
+        <div class="row">
+          <label class="check"><input type="checkbox" id="randomInterval">随机间隔 <span class="info-icon" data-tip="开启后，发送间隔在「发送间隔」到「最大间隔(ms)」之间随机取值，更像真人；关闭则固定使用「发送间隔」">i</span></label>
+          <label>最大间隔(ms)<br><input type="number" id="intervalMaxMs" value="8000" min="500" step="100"></label>
+        </div>
+        <div class="row">
+          <button id="btnSendNow" class="danger">立即续火花</button>
+          <button id="btnSaveCfg">保存配置</button>
+          <button id="btnGenTask" title="生成 Windows 计划任务：程序不开也能每天到点自动续火花一次">生成计划任务</button>
+        </div>
+        <div class="opts">
+          <label class="check"><input type="checkbox" id="autoOn">每日自动续火花 <span class="info-icon" data-tip="程序需常驻（窗口/托盘开着）才到点执行；程序关了请用「生成计划任务」兜底">i</span></label>
+          <label class="check"><input type="checkbox" id="secondTimeEnabled">每日双时段兜底 <span class="info-icon" data-tip="早时段没发成功时，第二时段自动补发一次（可选开关）">i</span></label>
+          <label>第二时段<br><input type="time" id="secondTime" value="21:00"></label>
+          <label class="check"><input type="checkbox" id="skipSent">跳过今天已发过 <span class="info-icon" data-tip="只跳过本工具今天已发送成功的好友，与火花是否亮着无关">i</span></label>
+          <div class="row optrow"><span class="optlabel">关闭时：</span>
+            <label class="rdo"><input type="radio" name="closeBeh" id="closeTray" value="tray" checked>最小化到托盘</label>
+            <label class="rdo"><input type="radio" name="closeBeh" id="closeExit" value="exit">直接退出</label>
+          </div>
+          <div class="row optrow"><span class="optlabel">联网模式：</span>
+            <label class="rdo"><input type="radio" name="netMode" id="netAlways" value="always" checked>一直联网 <span class="info-icon" data-tip="抖音页面始终联网，方便随时手动续火花">i</span></label>
+            <label class="rdo"><input type="radio" name="netMode" id="netAuto" value="auto">续完火花自动断网 <span class="info-icon" data-tip="发送完成后断开抖音页网络，到定时时间自动联网刷新再续火花。仅已登录时生效（未登录保持联网）；断网期间手动发送会自动先联网；检测到登录失效会自动恢复联网">i</span></label>
+          </div>
+          <label class="check"><input type="checkbox" id="notifyOn">邮箱通知</label>
+          <label class="check"><input type="checkbox" id="autoStart">开机自启动（进托盘） <span class="info-icon" data-tip="开机后自动启动并最小化到托盘，不弹主界面（需已登录账号才能自动续火花）；勾选即自动保存并写入系统登录启动项，取消勾选即移除">i</span></label>
+          <div id="autoStartStatus" class="hint" style="margin:2px 0 0 4px;font-size:11px"></div>
+          <label class="check"><input type="checkbox" id="uiParticles">二次元背景粒子 <span class="info-icon" data-tip="开启后界面背景会漂浮爱心/星星等小粒子（纯 CSS 动画，低资源占用，不耗 CPU 逐帧循环）；系统开了「减少动态效果」时自动不显示">i</span></label>
+          <label class="check"><input type="checkbox" id="disableGpu">禁用GPU加速 <span class="info-icon" data-tip="电脑显卡驱动异常导致界面白屏/花屏/闪退时开启此选项（如远程桌面、老显卡）；需重启软件后生效">i</span></label>
+          <details class="smtpPanel">
+            <summary>邮箱 SMTP 配置（点开设置）</summary>
+            <div class="row">
+              <input type="text" id="smtpHost" placeholder="SMTP服务器 如 smtp.163.com" style="flex:1;min-width:0">
+              <input type="number" id="smtpPort" value="465" style="width:64px" title="465=加密, 587=普通+STARTTLS">
+            </div>
+            <div class="row">
+              <input type="text" id="smtpUser" placeholder="发件账号" style="flex:1;min-width:0">
+            </div>
+            <div class="row">
+              <input type="password" id="smtpPass" placeholder="授权码(非登录密码)" style="flex:1;min-width:0">
+              <input type="text" id="smtpTo" placeholder="收件邮箱" style="flex:1;min-width:0">
+            </div>
+            <div class="row">
+              <button id="btnTestMail" class="btn-test" title="用当前填写的 SMTP 配置发一封测试邮件">发送测试邮件</button>
+              <span class="hint">465加密 / 587普通</span>
+            </div>
+          </details>
+        </div>
+        <div id="taskResult" class="taskresult" hidden></div>
+      </section>
+    </div>
+
+    <div class="colFriends">
+      <section class="panel friendPanel">
+        <h2>好友 / 续火花目标 <span id="sentStat" class="muted"></span> <span class="info-icon" data-tip="登录后打开抖音页会自动读取好友列表，也可点「读取好友列表」手动获取">i</span><button id="btnCal" class="cal-icon-btn" type="button" title="续火花日历：查看每天的续火花结果（点击展开，点其他地方或按 Esc 关闭）">📅</button></h2>
+        <div class="row">
+          <button id="btnParseFriends" class="primary">读取好友列表</button>
+          <button id="btnSelectAllSpark">全选有火花</button>
+          <button id="btnSelectNone">全不选</button>
+          <input type="search" id="friendSearch" class="friend-search" placeholder="🔍 搜索昵称/消息…">
+          <span id="selCount" class="muted">已选 0</span>
+          <label class="check inline"><input type="checkbox" id="filterUnsent">只看今天未续</label>
+          <label class="check inline"><input type="checkbox" id="filterSel">只看已选好友</label>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th></th><th>昵称</th><th>火花</th><th>今日</th><th>独立时间 <span class="info-icon" data-tip="留空 = 用左侧「全局时间」发送；填了则该好友单独在此时发送（需窗口/托盘常驻）">i</span></th><th>最后消息</th></tr></thead>
+            <tbody id="friendBody"><tr class="empty"><td colspan="6">尚未读取。登录后自动获取，或点「读取好友列表」。</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+<footer>
+  <details class="logPanel">
+    <summary>运行日志<span class="muted">（点开查看）</span></summary>
+    <div class="footbar"><span class="muted">实时日志</span><button id="btnClearLog">清空</button></div>
+    <pre id="logBox"></pre>
+  </details>
+</footer>
+<!-- 续火花日历浮层：挂在 body 顶层（position:fixed），避免面板 overflow 裁剪与层叠上下文遮挡；
+     默认隐藏，点好友面板标题栏 📅 图标弹出，点浮层外任意处或按 Esc 关闭 -->
+<div id="calPopup" class="cal-popup" hidden>
+  <div class="calHead">
+    <button id="calPrev" type="button" title="上个月">◀</button>
+    <span id="calTitle" class="calTitle"></span>
+    <button id="calNext" type="button" title="下个月">▶</button>
+    <button id="calToday" type="button" title="回到本月">今天</button>
+    <button id="calClear" type="button" class="btn-clear" title="清空当前账号的日历记录">清空</button>
+  </div>
+  <div id="calNote" class="muted cal-popup-note"></div>
+  <div class="calGrid" id="calGrid"></div>
+  <div class="calLegend"><span class="calDot ok"></span>全部成功&nbsp;<span class="calDot fail"></span>有失败&nbsp;<span class="calDot none"></span>无记录/未到</div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

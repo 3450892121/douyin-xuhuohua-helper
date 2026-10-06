@@ -1,0 +1,28 @@
+# 数据与隐私（config.json 含 SMTP 授权码密文、send-log.json 含好友昵称）
+续火花助手/data/
+
+# 依赖
+node_modules/
+
+# 打包产物（数百 MB 二进制 / 压缩包，不入库）
+dist/
+build/
+out/
+抖音续火花助手-免安装版*/
+*.zip
+*.7z
+
+# 日志
+*.log
+
+# 环境与系统文件
+.env
+.env.*
+*.local
+.DS_Store
+Thumbs.db
+
+# 本地私人文件，不入库
+/notes/
+/AGENTS.md
+/CLAUDE.md

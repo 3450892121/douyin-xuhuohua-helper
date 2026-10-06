@@ -1,0 +1,15 @@
+{
+  "name": "douyin-xuhuohua-helper",
+  "productName": "抖音续火花助手",
+  "version": "0.20.27",
+  "description": "抖音续火花助手（桌面版）——扫码登录 -> 好友火花列表 -> 手动/定时自动续火花",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.js && node --check preload-ui.js && node --check preload-douyin.js && node --check ui/app.js && node --check inject/douyin_auto.js && node --check inject/send_msg.js && node --check inject/qr_poll.js && node --check inject/android-bridge-shim.js && node --check lib/notify.js && node --check scripts/rebuild-unpacked.js && node --check scripts/runtime-files-check.js"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0"
+  }
+}
