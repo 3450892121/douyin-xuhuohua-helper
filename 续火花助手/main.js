@@ -634,6 +634,9 @@ function friendHasIdentity(f) {
  *      比较用 friendAvatarKey（去 CDN 域名），默认占位头像不算有效头像；
  *   4) 会话内容一致：消息预览与时间在双方都非空时必须相等（同一行两次收集内容逐字
  *      相同；真重名的两个人预览文本与时间戳不可能完全一样）。
+ *      例外：预览位是在线状态文本（isPresenceText，如「30分钟内在线」）时不是消息内容，
+ *      一律按空值参与比对——否则「默认头像/无 id」好友两程分别拍到状态文本与真实消息会被
+ *      判成矛盾 → 重复入列 → 防发错人守卫按「同名多条、头像全缺」整人停发（实证）。
  *   修正第 4 条适用范围：恰好一方为降级快照（id 与有效头像全缺）、另一方有身份
  *  信息时跳过内容比对——降级快照没有任何可区分身份的字段，内容差异不构成「不同人」的证据；
  *  双方都无身份信息时仍按第 4 条保守保留（不合并）。
@@ -654,7 +657,9 @@ function friendsWeakSame(a, b) {
     // 恰好一方为降级快照（无 id 无有效头像）、另一方有身份信息：内容差异不构成矛盾，按昵称并入
     // （双方都无身份信息时不在此返回，继续走下面的内容一致判定 → 保守保留）
     if (friendHasIdentity(a) !== friendHasIdentity(b)) return true;
-    const ma = normFriendText(a.lastMessage), mb = normFriendText(b.lastMessage);
+    // 在线状态文本不是消息内容，按空值比对（见上方第 4 条例外说明）
+    const ma = isPresenceText(a.lastMessage) ? '' : normFriendText(a.lastMessage);
+    const mb = isPresenceText(b.lastMessage) ? '' : normFriendText(b.lastMessage);
     if (ma && mb && ma !== mb) return false;
     const ta = normFriendText(a.lastTimeText), tb = normFriendText(b.lastTimeText);
     if (ta && tb && ta !== tb) return false;
@@ -1185,11 +1190,12 @@ function createTray() {
 
 /* ---------------- 桥接路由（抖音页 -> 主进程 -> UI） ---------------- */
 /* 桥接事件白名单：只接受我们注入脚本会发出的 name，未知 name 一律丢弃；
- * 参数做形状校验 + 长度/数量上限，避免抖音页面自身脚本（第三方不可信）伪造事件刷日志/刷 UI。 */
+ * 参数做形状校验 + 长度/数量上限，避免抖音页面自身脚本（第三方不可信）伪造事件刷日志/刷 UI。
+ * 注：旧的原生式发送队列事件（enterChat/sendResult/backList/progress/chatData*）随注入侧死代码删除，
+ * 发送结果统一走 sendResult2（发送引擎 send_msg.js 专用）。 */
 const BRIDGE_ALLOWED_NAMES = new Set([
-  'qr', 'qrFailed', 'loginState', 'pageReady', 'friendList', 'enterChat',
-  'sendResult', 'sendResult2', 'backList', 'progress', 'error', 'log',
-  'chatData', 'chatDataAppend', 'chatDataSupplement'
+  'qr', 'qrFailed', 'loginState', 'pageReady', 'friendList',
+  'sendResult2', 'error', 'log'
 ]);
 const BRIDGE_MAX_ARGS = 20;
 // 单参数字符串上限 64KB：二维码 data URL（高 DPR/大画布下 base64 可超 4KB）与好友列表 JSON 等
@@ -1218,10 +1224,8 @@ const bridgeRates = new WeakMap();
 function validBridgePayload(name, args) {
   const schemas = {
     qr: ['string', 'string'], qrFailed: ['string'], loginState: ['boolean'], pageReady: ['string', 'string'],
-    friendList: ['string'], enterChat: ['boolean', 'string', 'string'], sendResult: ['boolean', 'string', 'string'],
-    sendResult2: ['boolean', 'string', 'string', 'boolean'], backList: ['boolean', 'string'],
-    progress: ['number', 'number', 'string', 'string'], error: ['string', 'string'], log: ['string', 'string'],
-    chatData: ['string'], chatDataAppend: ['string'], chatDataSupplement: ['string']
+    friendList: ['string'], sendResult2: ['boolean', 'string', 'string', 'boolean'],
+    error: ['string', 'string'], log: ['string', 'string']
   };
   const shape = schemas[name];
   if (!shape || !args || args.length !== shape.length || shape.some(function (type, i) { return typeof args[i] !== type; })) return false;
@@ -1320,10 +1324,6 @@ function handleBridge(accountId, name, args) {
     }
     case 'pageReady': logLine('info', '[页面] 就绪: ' + String(args[0] || '').slice(0, 120)); break;
     case 'friendList': handleFriendList(accountId, args[0]); break;
-    case 'enterChat': sendUI({ type: 'enterChat', accountId: accountId, ok: !!args[0], nickname: String(args[1] || ''), message: String(args[2] || '') }); break;
-    case 'sendResult':
-      sendUI({ type: 'sendResult', accountId: accountId, ok: !!args[0], nickname: String(args[1] || ''), text: String(args[2] || '') });
-      break;
     case 'sendResult2': {
       const waiter = sendWaits.get(accountId);
       if (notifySendResult(accountId, args[0], args[1], args[2], args[3])) {
@@ -1331,10 +1331,6 @@ function handleBridge(accountId, name, args) {
       }
       break;
     }
-    case 'backList': sendUI({ type: 'backList', accountId: accountId, ok: !!args[0], message: String(args[1] || '') }); break;
-    case 'progress':
-      sendUI({ type: 'progress', accountId: accountId, index: Number(args[0] || 0), total: Number(args[1] || 0), nickname: String(args[2] || ''), stage: String(args[3] || '') });
-      break;
     case 'error':
       logLine('error', '[脚本] ' + String(args[1] !== undefined ? args[1] : args[0] || ''));
       break;

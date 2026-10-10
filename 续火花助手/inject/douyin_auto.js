@@ -113,33 +113,6 @@
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms || 300); }); }
 
-  /** 简易的"等元素出现"，最多重试 maxTimes 次，每次间隔 interval ms */
-  function waitFor(fn, maxTimes, interval) {
-    maxTimes = maxTimes || 30;
-    interval = interval || 300;
-    return new Promise(function (resolve) {
-      var n = 0;
-      (function tick() {
-        try {
-          var r = fn();
-          if (r) return resolve(r);
-        } catch (e) { /* swallow */ }
-        n++;
-        if (n >= maxTimes) return resolve(null);
-        setTimeout(tick, interval);
-      })();
-    });
-  }
-
-  function toArray(listLike) {
-    if (!listLike) return [];
-    try { return Array.prototype.slice.call(listLike); } catch (e) {
-      var arr = [];
-      for (var i = 0; i < listLike.length; i++) arr.push(listLike[i]);
-      return arr;
-    }
-  }
-
   /** 判断登录状态。启发式：
    *  1. 如果存在登录弹窗、或可见的二维码登录组件 => 未登录
    *  2. 如果存在用户头像/昵称入口（通常右上角），且无强制登录遮罩 => 已登录
@@ -1156,6 +1129,10 @@
      *      比较用 avatarKeyOf（去 CDN 域名），默认占位头像不算有效头像；
      *   4) 会话内容一致：最后消息预览与时间在双方都非空时必须相等（虚拟列表重复行内容
      *      必然逐字相同；真重名的两个人预览文本+时间戳不可能完全一样）。
+     *      例外：预览位是在线状态文本（如「30分钟内在线」）时不是消息内容，按空值参与比对
+     *      ——否则「默认头像/无 id」好友两程分别拍到状态文本与真实消息会被判成矛盾 →
+     *      重复入列 → 主进程防发错人守卫按「同名多条、头像全缺」整人停发（与主进程
+     *      friendsWeakSame 同口径）。
      *   修正第 4 条适用范围：恰好一方为降级快照（id 与有效头像全缺）、另一方有身份
      *  信息时跳过内容比对——降级快照没有任何可区分身份的字段，内容差异不构成「不同人」的证据；
      *  双方都无身份信息时仍按第 4 条保守保留（不合并）。
@@ -1176,7 +1153,11 @@
         // 恰好一方为降级快照（无 id 无有效头像）、另一方有身份信息：内容差异不构成矛盾，按昵称并入
         // （双方都无身份信息时不在此返回，继续走下面的内容一致判定 → 保守保留）
         if (hasIdentitySnapshot(a) !== hasIdentitySnapshot(b)) return true;
-        var ma = normTxt(a.lastMessage), mb = normTxt(b.lastMessage);
+        // 局部闭包而非外部函数（与 mergeSnapshot 同原因：本函数可能被测试脚本按名抽取单独执行）；
+        // 在线状态文本不是消息内容，按空值比对（见上方第 4 条例外说明）
+        var isPresence = function (s) { return /^(?:在线|\d+\s*(?:分钟|小时|天|周|个月|月)内在线)$/.test(normTxt(s)); };
+        var ma = isPresence(a.lastMessage) ? '' : normTxt(a.lastMessage);
+        var mb = isPresence(b.lastMessage) ? '' : normTxt(b.lastMessage);
         if (ma && mb && ma !== mb) return false;
         var ta = normTxt(a.lastTimeText), tb = normTxt(b.lastTimeText);
         if (ta && tb && ta !== tb) return false;
@@ -1502,289 +1483,6 @@
     return document.documentElement || document.body;
   }
 
-  // ===================== 进入会话 / 发送消息 / 返回 =====================
-
-  /** 根据 index 或 昵称点击会话 */
-  function enterChat(target) {
-    // target: { domIndex?:number, nickname?:string, id?:string }
-    return Promise.resolve().then(function () {
-      var items = queryChatListItems();
-      if (!items.length) {
-        error('enter_chat_empty', '没有找到会话列表条目');
-        try { if (hasBridge()) B.onEnterChatResult(false, target.nickname || '', '会话列表为空'); } catch (ignored) {}
-        return false;
-      }
-      var idx = -1;
-      if (typeof target.domIndex === 'number' && target.domIndex >= 0 && target.domIndex < items.length) {
-        idx = target.domIndex;
-      } else if (target.id) {
-        for (var i = 0; i < items.length; i++) { if (extractId(items[i]) === target.id) { idx = i; break; } }
-      }
-      if (idx < 0 && target.nickname) {
-        var best = -1, bestDist = Infinity;
-        for (var j = 0; j < items.length; j++) {
-          var nn = extractNickname(items[j]);
-          if (nn === target.nickname) { idx = j; break; }
-          if (nn.indexOf(target.nickname) >= 0 || target.nickname.indexOf(nn) >= 0) {
-            var d = Math.abs(nn.length - target.nickname.length);
-            if (d < bestDist) { bestDist = d; best = j; }
-          }
-        }
-        if (idx < 0 && best >= 0) idx = best;
-      }
-      if (idx < 0) {
-        error('enter_chat_not_found', '没有找到会话: ' + JSON.stringify(target));
-        try { if (hasBridge()) B.onEnterChatResult(false, target.nickname || '', '找不到会话条目'); } catch (ignored) {}
-        return false;
-      }
-      var el = items[idx];
-      var nick = extractNickname(el);
-      try {
-        // 先聚焦 + click（原生 click 模拟）
-        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-      } catch (ignored) {}
-      return sleep(200).then(function () {
-        return simulateClick(el);
-      }).then(function (ok) {
-        if (!ok) {
-          try { if (hasBridge()) B.onEnterChatResult(false, nick || target.nickname || '', '点击失败'); } catch (ignored) {}
-          return false;
-        }
-        return sleep(500).then(function () {
-          // 判断是否进入聊天页：出现输入框
-          var input = findChatInput();
-          var success = !!input;
-          try {
-            if (hasBridge()) B.onEnterChatResult(success, nick || target.nickname || '', success ? '' : '聊天输入框未出现');
-          } catch (ignored) {}
-          return success;
-        });
-      });
-    });
-  }
-
-  /** 模拟鼠标点击（mousedown / mouseup / click），绕过部分防自动化检测 */
-  function simulateClick(el) {
-    if (!el) return Promise.resolve(false);
-    try {
-      var box = el.getBoundingClientRect();
-      if (!box.width && !box.height) return Promise.resolve(false);
-      var cx = box.left + box.width / 2;
-      var cy = box.top + box.height / 2;
-      var mkEvent = function (type) {
-        if (typeof MouseEvent === 'function') {
-          return new MouseEvent(type, {
-            view: window, bubbles: true, cancelable: true,
-            clientX: cx, clientY: cy, button: 0
-          });
-        }
-        // fallback
-        var e = document.createEvent('MouseEvent');
-        e.initMouseEvent(type, true, true, window, 0, cx, cy, cx, cy, false, false, false, false, 0, null);
-        return e;
-      };
-      el.dispatchEvent(mkEvent('mouseover'));
-      el.dispatchEvent(mkEvent('mousedown'));
-      el.dispatchEvent(mkEvent('mouseup'));
-      // el.click() 本身就会派发一次 click 事件；再 dispatchEvent 一次会让 React onClick 触发两次
-      // （返回按钮连退两级、发送按钮双发消息），二者留一
-      el.click();
-      return Promise.resolve(true);
-    } catch (e) {
-      error('sim_click_err', String(e && e.stack ? e.stack : e));
-      return Promise.resolve(false);
-    }
-  }
-
-  function findChatInput() {
-    // 聊天输入框：contenteditable 或者 textarea / input[type=text]
-    var list = [
-      'div[contenteditable="true"][role="textbox"]',
-      'div[contenteditable="true"]',
-      'textarea[placeholder*="消息"], textarea[placeholder*="发送"], textarea[placeholder*="说点"], textarea[placeholder*="输入"]',
-      'input[type="text"][placeholder*="消息"], input[type="text"][placeholder*="发送"], input[type="text"][placeholder*="说点"]',
-      'textarea'
-    ];
-    for (var i = 0; i < list.length; i++) {
-      var inputs = document.querySelectorAll(list[i]);
-      for (var j = 0; j < inputs.length; j++) {
-        var el = inputs[j];
-        if (el.offsetParent === null) continue;
-        var rect = el.getBoundingClientRect();
-        if (rect.width < 150 || rect.height < 30) continue;
-        return el;
-      }
-    }
-    return null;
-  }
-
-  function findSendButton() {
-    var btns = document.querySelectorAll('button, div[role="button"], span[role="button"], a[role="button"]');
-    for (var i = 0; i < btns.length; i++) {
-      var b = btns[i];
-      if (b.offsetParent === null) continue;
-      var t = (b.innerText || b.textContent || '').trim();
-      if (t === '发送' || t === 'Send') return b;
-      var aria = (b.getAttribute('aria-label') || '').toLowerCase();
-      if (/^发送|发消息|send/.test(aria)) return b;
-    }
-    // 兜底：右下角第一个 icon 按钮（> textarea 附近的 svg/按钮）
-    return null;
-  }
-
-  function setInputContent(input, text) {
-    try {
-      input.focus();
-      if (input.tagName.toLowerCase() === 'textarea' || input.tagName.toLowerCase() === 'input') {
-        // 原生控件
-        var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement && HTMLInputElement.prototype, 'value')
-          || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement && HTMLTextAreaElement.prototype, 'value');
-        if (nativeSetter && nativeSetter.set) {
-          nativeSetter.set.call(input, text);
-        } else {
-          input.value = text;
-        }
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      }
-      // contenteditable
-      input.innerHTML = '';
-      // 把 text 按换行拆成 text nodes + <br>
-      var lines = String(text).split(/\r?\n/);
-      for (var i = 0; i < lines.length; i++) {
-        if (lines[i].length) input.appendChild(document.createTextNode(lines[i]));
-        if (i < lines.length - 1) input.appendChild(document.createElement('br'));
-      }
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      return true;
-    } catch (e) {
-      error('set_input_error', String(e && e.stack ? e.stack : e));
-      return false;
-    }
-  }
-
-  function sendMessage(text, nickname) {
-    return Promise.resolve().then(function () {
-      var input = findChatInput();
-      if (!input) {
-        try { if (hasBridge()) B.onSendMessageResult(false, nickname || '', '找不到聊天输入框'); } catch (ignored) {}
-        return false;
-      }
-      setInputContent(input, text);
-      return sleep(200).then(function () {
-        // 优先发送按钮
-        var btn = findSendButton();
-        if (btn) {
-          return simulateClick(btn).then(function () {
-            return sleep(300).then(function () {
-              try { if (hasBridge()) B.onSendMessageResult(true, nickname || '', text); } catch (ignored) {}
-              return true;
-            });
-          });
-        }
-        // 没有发送按钮则尝试 Enter / Ctrl+Enter
-        try {
-          input.focus();
-          var ev;
-          if (typeof KeyboardEvent === 'function') {
-            ev = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
-          } else {
-            ev = document.createEvent('KeyboardEvent');
-            // @ts-ignore
-            ev.initKeyEvent('keydown', true, true, window, false, false, false, false, 13, 0);
-          }
-          input.dispatchEvent(ev);
-          try { if (hasBridge()) B.onSendMessageResult(true, nickname || '', text); } catch (ignored) {}
-          return true;
-        } catch (e) {
-          error('send_enter_err', String(e && e.stack ? e.stack : e));
-          try { if (hasBridge()) B.onSendMessageResult(false, nickname || '', '发送失败'); } catch (ignored) {}
-          return false;
-        }
-      });
-    });
-  }
-
-  function backToList() {
-    return Promise.resolve().then(function () {
-      try {
-        // 1) 返回按钮
-        var selectors = [
-          'button[aria-label="返回"], div[role="button"][aria-label="返回"]',
-          'svg[class*="back"]',
-          '[class*="back-btn"]',
-          '[class*="BackBtn"]'
-        ];
-        for (var i = 0; i < selectors.length; i++) {
-          var list = document.querySelectorAll(selectors[i]);
-          for (var j = 0; j < list.length; j++) {
-            if (list[j].offsetParent !== null) {
-              return simulateClick(list[j]).then(function () { return sleep(400); }).then(function () { return true; });
-            }
-          }
-        }
-        // 2) history.back
-        if (history && typeof history.back === 'function') {
-          var beforeHref = location.href;
-          history.back();
-          return sleep(500).then(function () {
-            var ok = (location.href !== beforeHref);
-            try { if (hasBridge()) B.onBackToListResult(ok, ok ? '' : 'history.back 未跳转'); } catch (ignored) {}
-            return ok;
-          });
-        }
-        try { if (hasBridge()) B.onBackToListResult(false, '无返回按钮且不支持 history'); } catch (ignored) {}
-        return false;
-      } catch (e) {
-        error('back_list_err', String(e && e.stack ? e.stack : e));
-        try { if (hasBridge()) B.onBackToListResult(false, String(e)); } catch (ignored) {}
-        return false;
-      }
-    });
-  }
-
-  // ===================== 自动续火花队列（可选前端内跑） =====================
-  // 注：我们也可以完全由 Java 端来编排。这里保留 JS 侧队列，便于独立调试。
-  function runAutoTasks(cfg) {
-    cfg = cfg || {};
-    var tasks = cfg.tasks || []; // [{ domIndex, nickname, id }]
-    var message = cfg.message || '续火花啦 🔥🔥🔥';
-    var intervalMs = cfg.intervalMs || 3000;
-    var actionDelayMs = cfg.actionDelayMs || 400;
-    var total = tasks.length;
-    log('info', '开始自动续火花，共 ' + total + ' 个任务');
-    if (!total) return Promise.resolve({ done: 0, failed: 0 });
-
-    var done = 0, failed = 0;
-    function step(i) {
-      if (i >= total) {
-        return Promise.resolve({ done: done, failed: failed });
-      }
-      var t = tasks[i];
-      try { if (hasBridge()) B.onProgress(i, total, t.nickname || '', '进入会话'); } catch (ignored) {}
-      return enterChat(t).then(function (ok) {
-        if (!ok) { failed++; return Promise.resolve(); }
-        try { if (hasBridge()) B.onProgress(i, total, t.nickname || '', '输入并发送'); } catch (ignored) {}
-        return sleep(actionDelayMs).then(function () {
-          return sendMessage(message, t.nickname || '').then(function (sOk) {
-            if (sOk) done++; else failed++;
-            return sleep(actionDelayMs);
-          });
-        }).then(function () {
-          try { if (hasBridge()) B.onProgress(i, total, t.nickname || '', '返回会话列表'); } catch (ignored) {}
-          return backToList().then(function () { return sleep(intervalMs); });
-        });
-      }).catch(function (e) {
-        failed++;
-        error('task_err', (t.nickname || '') + ' ' + String(e));
-        return null;
-      }).then(function () { return step(i + 1); });
-    }
-    return step(0);
-  }
-
   // ===================== 登录状态轮询 & 二维码刷新 =====================
 
   var loginCheckerTimer = null;
@@ -1915,22 +1613,6 @@
       var obj = {};
       try { obj = (typeof optsJson === 'string') ? JSON.parse(optsJson) : (optsJson || {}); } catch (ignored) {}
       return parseFriendList(obj.scrollCount || 0, obj.scrollDelayMs || 800);
-    },
-    enterChat: function (tgtJson) {
-      var obj = {};
-      try { obj = (typeof tgtJson === 'string') ? JSON.parse(tgtJson) : (tgtJson || {}); } catch (ignored) {}
-      return enterChat(obj);
-    },
-    sendMessage: function (cfgJson) {
-      var obj = {};
-      try { obj = (typeof cfgJson === 'string') ? JSON.parse(cfgJson) : (cfgJson || {}); } catch (ignored) {}
-      return sendMessage(obj.message || '', obj.nickname || '');
-    },
-    backToList: backToList,
-    runAutoTasks: function (cfgJson) {
-      var obj = {};
-      try { obj = (typeof cfgJson === 'string') ? JSON.parse(cfgJson) : (cfgJson || {}); } catch (ignored) {}
-      return runAutoTasks(obj);
     },
     startLoginChecker: startLoginChecker,
     stopLoginChecker: stopLoginChecker,

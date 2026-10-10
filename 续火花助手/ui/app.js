@@ -359,7 +359,6 @@ function handleEvent(obj) {
       if (obj.ok) appendLog('info', '✅ ' + obj.nickname);
       else appendLog('warn', '❌ ' + obj.nickname + (obj.text ? '：' + obj.text : ''));
       break;
-    case 'enterChat': if (!isCur) break; if (!obj.ok) appendLog('warn', '进入会话失败 ' + obj.nickname); break;
     default: break;
   }
 }

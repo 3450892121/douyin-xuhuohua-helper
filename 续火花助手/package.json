@@ -7,7 +7,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload-ui.js && node --check preload-douyin.js && node --check ui/app.js && node --check inject/douyin_auto.js && node --check inject/send_msg.js && node --check inject/qr_poll.js && node --check inject/android-bridge-shim.js && node --check lib/notify.js && node --check scripts/rebuild-unpacked.js && node --check scripts/runtime-files-check.js"
+    "test": "node --test",
+    "check": "node --check main.js && node --check preload-ui.js && node --check preload-douyin.js && node --check ui/app.js && node --check inject/douyin_auto.js && node --check inject/send_msg.js && node --check inject/qr_poll.js && node --check inject/android-bridge-shim.js && node --check lib/notify.js && node --check scripts/rebuild-unpacked.js && node --check scripts/runtime-files-check.js && node --check test/main.test.js"
   },
   "devDependencies": {
     "electron": "^44.0.0"

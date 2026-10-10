@@ -36,6 +36,7 @@ cd 续火花助手
 npm install       :: 国内网络可双击「安装依赖.bat」，走 npmmirror 镜像
 npm start         :: 开发模式启动
 npm run check     :: 语法检查（node --check 全部 JS）
+npm test          :: 单元测试（node:test，无需 Electron；覆盖好友去重/防发错人裁决/定时次序/配置迁移/桥接闸门）
 ```
 
 打包免安装版：
@@ -54,6 +55,7 @@ node scripts/rebuild-unpacked.js   :: 产出 dist/win-unpacked，自动内嵌 ex
   - `ui/` — 主界面（原生 HTML/CSS/JS，无框架）
   - `lib/notify.js` — 手写 SMTP 邮件客户端（零依赖）
   - `scripts/` — 打包、运行时文件自检、图标工具
+  - `test/` — 单元测试（`npm test`，纯函数与历史回归用例）
 
 ## 数据与隐私
 
